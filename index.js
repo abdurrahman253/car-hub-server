@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const admin = require("firebase-admin");
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config(); // <-- Load .env variables
 
 const app = express();
@@ -61,6 +61,50 @@ app.get('/latest-products', async (req, res) => {
   }
 });
 
+
+
+// Get Product Details 
+app.get('/products/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    // 1. Id validation
+    if (!ObjectId.isValid(id)) {
+      return res.send({
+        success: false,
+        result: null,
+        message: "Invalid ID format"
+      });
+    }
+
+    const query = { _id: new ObjectId(id) };
+    const result = await productsCollection.findOne(query);
+
+    // if product not found 
+    if (!result) {
+      return res.send({
+        success: false,
+        result: null,
+        message: "Product not found"
+      });
+    }
+
+    // success message 
+    res.send({
+      success: true,
+      result
+    });
+
+  } catch (error) {
+    console.error("Product fetch error:", error);
+    res.status(500).send({
+      success: false,
+      result: null,
+      message: "Server error",
+      error: error.message
+    });
+  }
+});
 
 
 
