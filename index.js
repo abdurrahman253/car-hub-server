@@ -5,7 +5,7 @@ const { MongoClient, ServerApiVersion } = require('mongodb');
 require('dotenv').config(); // <-- Load .env variables
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors());
@@ -39,6 +39,66 @@ async function run() {
       const result = await productsCollection.find().toArray();
       res.send(result);
     });
+
+
+  // Get Latest 6 Products
+app.get('/latest-products', async (req, res) => {
+  try {
+    const cursor = productsCollection
+      .find()
+      .sort({ created_at: -1 })  
+      .limit(6);                
+
+    const result = await cursor.toArray();
+
+    res.send({
+      success: true,
+      result
+    });
+  } catch (error) {
+    console.error("Error fetching latest products:", error);
+    res.status(500).send({ success: false, message: "Server error" });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// search 
+app.get("/search", async (req, res) => {
+  try {
+    const search_text = req.query.search?.trim();
+    if (!search_text) return res.send([]);
+
+    const result = await productsCollection
+      .find({ productName: { $regex: search_text, $options: "i" } })
+      .limit(20)
+      .toArray();
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
+
+
+
+
 
     await client.db("admin").command({ ping: 1 });
     console.log("✅ Successfully connected to MongoDB!");
