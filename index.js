@@ -10,7 +10,7 @@ const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
-// Firebase Admin - Environment Variable
+// === Firebase Admin - Environment Variable ===
 let adminApp;
 try {
   const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -21,7 +21,7 @@ try {
   console.error("Firebase init error:", error);
 }
 
-// === MongoDB: Global Client with Timeout Fixes ===
+// === MongoDB: Global Client Reuse ===
 let client;
 let db;
 let productsCollection;
@@ -30,23 +30,24 @@ let importsCollection;
 const connectDB = async () => {
   if (db) return db;
 
- const client = new MongoClient(process.env.MONGODB_URI, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  },
-  maxPoolSize: 5,
-  minPoolSize: 1,
-  maxIdleTimeMS: 30000,
-  serverSelectionTimeoutMS: 30000,
-  socketTimeoutMS: 45000,
-});
+  try {
+    client = new MongoClient(process.env.MONGODB_URI, {
+      serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+      },
+      maxPoolSize: 5,
+      minPoolSize: 1,
+      maxIdleTimeMS: 30000,
+      serverSelectionTimeoutMS: 30000,
+      socketTimeoutMS: 45000,
+    });
 
     console.log("Connecting to MongoDB...");
     await client.connect();
     console.log("MongoDB connected!");
-    
+
     db = client.db(process.env.DB_NAME);
     productsCollection = db.collection('products');
     importsCollection = db.collection('imports');
@@ -93,7 +94,7 @@ app.get('/health', async (req, res) => {
 app.get('/products', async (req, res) => {
   try {
     await connectDB();
-    const result = await productsCollection.find({}).limit(50).toArray(); // Limit for Vercel
+    const result = await productsCollection.find({}).limit(50).toArray();
     res.json({ success: true, data: result });
   } catch (error) {
     console.error("GET /products:", error);
