@@ -25,9 +25,9 @@ try {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
   });
+  console.log("✅ Firebase Admin initialized");
 } catch (error) {
-  console.error("Firebase init error:", error);
-  
+  console.error("❌ Firebase init error:", error);
 }
 
 
@@ -55,14 +55,14 @@ const connectDB = async () => {
 
     console.log("Connecting to MongoDB...");
     await client.connect();
-    console.log("MongoDB connected!");
+    console.log("✅ MongoDB connected!");
 
     db = client.db(process.env.DB_NAME);
     productsCollection = db.collection('products');
     importsCollection = db.collection('imports');
     return db;
   } catch (error) {
-    console.error("MongoDB connection failed:", error);
+    console.error("❌ MongoDB connection failed:", error);
     throw error;
   }
 };
@@ -70,16 +70,31 @@ const connectDB = async () => {
 // === Verify Token ===
 const verifyToken = async (req, res, next) => {
   const auth = req.headers.authorization;
+  
   if (!auth?.startsWith('Bearer ')) {
-    return res.status(401).json({ success: false, message: "No token" });
+    console.log("❌ No token provided");
+    return res.status(401).json({ success: false, message: "No token provided" });
   }
+  
   try {
-    const decoded = await adminApp.auth().verifyIdToken(auth.split(' ')[1]);
-    req.user = { email: decoded.email, uid: decoded.uid };
+    const token = auth.split(' ')[1];
+    
+    // এখানে admin লিখুন, adminApp না!
+    const decoded = await admin.auth().verifyIdToken(token);
+    
+    req.user = { 
+      email: decoded.email, 
+      uid: decoded.uid 
+    };
+    
+    console.log("✅ Token verified for:", decoded.email);
     next();
   } catch (error) {
-    console.error("Token error:", error);
-    return res.status(401).json({ success: false, message: "Invalid token" });
+    console.error("❌ Token verification error:", error.message);
+    return res.status(401).json({ 
+      success: false, 
+      message: "Invalid or expired token" 
+    });
   }
 };
 
@@ -136,14 +151,16 @@ app.get('/my-exports', verifyToken, async (req, res) => {
     res.json({ success: true, result });
   } catch (error) {
     console.error("GET /my-exports:", error);
-    res.status(500).json({ success: false });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
 // DELETE Product
 app.delete('/products/:id', verifyToken, async (req, res) => {
   try {
-    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ success: false });
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid ID" });
+    }
     await connectDB();
     const result = await productsCollection.deleteOne({
       _id: new ObjectId(req.params.id),
@@ -152,14 +169,16 @@ app.delete('/products/:id', verifyToken, async (req, res) => {
     res.json({ success: result.deletedCount > 0 });
   } catch (error) {
     console.error("DELETE /products:", error);
-    res.status(500).json({ success: false });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
 // UPDATE Product
 app.patch('/products/:id', verifyToken, async (req, res) => {
   try {
-    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ success: false });
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid ID" });
+    }
     await connectDB();
     const result = await productsCollection.updateOne(
       { _id: new ObjectId(req.params.id), createdBy: req.user.email },
@@ -168,7 +187,7 @@ app.patch('/products/:id', verifyToken, async (req, res) => {
     res.json({ success: result.matchedCount > 0 });
   } catch (error) {
     console.error("PATCH /products:", error);
-    res.status(500).json({ success: false });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -178,8 +197,9 @@ app.post('/import-product', verifyToken, async (req, res) => {
     await connectDB();
     const { productId, importQuantity = 1 } = req.body;
     const qty = Number(importQuantity);
+    
     if (!ObjectId.isValid(productId) || qty < 1) {
-      return res.status(400).json({ success: false });
+      return res.status(400).json({ success: false, message: "Invalid data" });
     }
 
     const product = await productsCollection.findOne({ _id: new ObjectId(productId) });
@@ -215,7 +235,7 @@ app.post('/import-product', verifyToken, async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error("POST /import-product:", error);
-    res.status(500).json({ success: false });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -256,14 +276,16 @@ app.get('/my-imports', verifyToken, async (req, res) => {
     res.json({ success: true, result });
   } catch (error) {
     console.error("GET /my-imports:", error);
-    res.status(500).json({ success: false });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
 // Remove Import
 app.delete('/my-imports/product/:productId', verifyToken, async (req, res) => {
   try {
-    if (!ObjectId.isValid(req.params.productId)) return res.status(400).json({ success: false });
+    if (!ObjectId.isValid(req.params.productId)) {
+       return res.status(400).json({ success: false, message: "Invalid ID" });
+    }
     await connectDB();
 
     const importDoc = await importsCollection.findOne({
@@ -271,7 +293,9 @@ app.delete('/my-imports/product/:productId', verifyToken, async (req, res) => {
       productId: new ObjectId(req.params.productId)
     });
 
-    if (!importDoc) return res.status(404).json({ success: false });
+    if (!importDoc) {
+      return res.status(404).json({ success: false, message: "Import not found" });
+    }
 
     if (importDoc.importedQuantity === 1) {
       await importsCollection.deleteOne({ _id: importDoc._id });
@@ -290,7 +314,7 @@ app.delete('/my-imports/product/:productId', verifyToken, async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error("DELETE /my-imports:", error);
-    res.status(500).json({ success: false });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -307,7 +331,7 @@ app.get('/search', async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error("GET /search:", error);
-    res.status(500).json({ success: false });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -315,7 +339,8 @@ app.get('/search', async (req, res) => {
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
   });
 }
-module.exports = app;
+
+module.exports = app; 
