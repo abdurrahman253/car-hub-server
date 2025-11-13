@@ -10,18 +10,27 @@ const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
-// === Firebase Admin - Environment Variable ===
-let adminApp;
+
+// Firebase Admin
+let serviceAccount;
 try {
-  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-  adminApp = admin.initializeApp({
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    // Vercel: Use env var
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  } else {
+    // Local: Use file
+    serviceAccount = require("./ServiceKey.json");
+  }
+  
+  admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
   });
 } catch (error) {
   console.error("Firebase init error:", error);
+  
 }
 
-// === MongoDB: Global Client Reuse ===
+
 let client;
 let db;
 let productsCollection;
@@ -302,5 +311,11 @@ app.get('/search', async (req, res) => {
   }
 });
 
-// === Vercel Export ===
+// === Start Server (Local only) ===
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
 module.exports = app;
