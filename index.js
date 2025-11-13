@@ -15,10 +15,8 @@ app.use(express.json());
 let serviceAccount;
 try {
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    // Vercel: Use env var
     serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
   } else {
-    // Local: Use file
     serviceAccount = require("./ServiceKey.json");
   }
   
@@ -78,8 +76,6 @@ const verifyToken = async (req, res, next) => {
   
   try {
     const token = auth.split(' ')[1];
-    
-    // এখানে admin লিখুন, adminApp না!
     const decoded = await admin.auth().verifyIdToken(token);
     
     req.user = { 
@@ -122,6 +118,29 @@ app.get('/products', async (req, res) => {
     res.json({ success: true, data: result });
   } catch (error) {
     console.error("GET /products:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// get details 
+app.get('/products/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid product ID" });
+    }
+    
+    await connectDB();
+    const product = await productsCollection.findOne({ _id: new ObjectId(id) });
+    
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+    
+    res.json({ success: true, result: product });
+  } catch (error) {
+    console.error("GET /products/:id:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -335,7 +354,7 @@ app.get('/search', async (req, res) => {
   }
 });
 
-// === Start Server (Local only) ===
+
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
@@ -343,4 +362,4 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
-module.exports = app; 
+module.exports = app;
