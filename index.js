@@ -148,9 +148,24 @@ app.get('/products/:id', verifyToken , async (req, res) => {
 
 
 
+// Add Export 
+app.post('/products', verifyToken, async (req, res) => {
+  try {
+    const newProduct = req.body;
+    newProduct.createdBy = req.user.email;
+    newProduct.createdAt = new Date();
+
+    const result = await productsCollection.insertOne(newProduct);
+    res.json({ success: true, insertedId: result.insertedId });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
 
 
+
+// Import Area 
 
 
 // import-product
@@ -218,7 +233,7 @@ app.post('/import-product', verifyToken, async (req, res) => {
 
 
 
-// GET: My Imports
+//  My Imports
 app.get('/my-imports', verifyToken, async (req, res) => {
   try {
     const userEmail = req.user.email;
@@ -261,7 +276,7 @@ app.get('/my-imports', verifyToken, async (req, res) => {
   }
 });
 
-// DELETE: Remove Import
+//  Remove Import
 app.delete('/my-imports/product/:productId', verifyToken, async (req, res) => {
   try {
     const productId = req.params.productId;
@@ -307,6 +322,57 @@ app.delete('/my-imports/product/:productId', verifyToken, async (req, res) => {
   }
 });
 
+
+
+
+// Export Area
+
+
+
+//  My Exports
+app.get('/my-exports', verifyToken, async (req, res) => {
+  try {
+    const result = await productsCollection.find({ createdBy: req.user.email }).toArray();
+    res.json({ success: true, result });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// DELETE Product
+app.delete('/products/:id', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userEmail = req.user.email;
+
+    const product = await productsCollection.findOne({ _id: new ObjectId(id), createdBy: userEmail });
+    if (!product) return res.status(404).json({ success: false });
+
+    await productsCollection.deleteOne({ _id: new ObjectId(id) });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+//  Update Product
+app.patch('/products/:id', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const userEmail = req.user.email;
+
+    const result = await productsCollection.updateOne(
+      { _id: new ObjectId(id), createdBy: userEmail },
+      { $set: updates }
+    );
+
+    if (result.matchedCount === 0) return res.status(404).json({ success: false });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
 
 
 
