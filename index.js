@@ -30,20 +30,18 @@ let importsCollection;
 const connectDB = async () => {
   if (db) return db;
 
-  try {
-    client = new MongoClient(process.env.MONGODB_URI, {
-      serverApi: {
-        version: ServerApiVersion.v1,
-        strict: true,
-        deprecationErrors: true,
-      },
-      maxPoolSize: 5, // Vercel: Small pool
-      minPoolSize: 1,
-      maxIdleTimeMS: 30000, // 30s idle timeout
-      serverSelectionTimeoutMS: 30000, // 30s connect timeout
-      socketTimeoutMS: 45000, // 45s socket timeout
-      bufferMaxEntries: 0, // Disable buffer
-    });
+ const client = new MongoClient(process.env.MONGODB_URI, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  },
+  maxPoolSize: 5,
+  minPoolSize: 1,
+  maxIdleTimeMS: 30000,
+  serverSelectionTimeoutMS: 30000,
+  socketTimeoutMS: 45000,
+});
 
     console.log("Connecting to MongoDB...");
     await client.connect();
