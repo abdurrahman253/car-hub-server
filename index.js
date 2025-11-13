@@ -1,337 +1,118 @@
+// index.js
 const express = require('express');
 const cors = require('cors');
 const admin = require("firebase-admin");
-const serviceAccount = require("./ServiceKey.json");
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-require('dotenv').config(); 
+require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
 app.use(express.json());
 
-
-// Firebase Admin SDK setup
+// Firebase Admin
+const serviceAccount = require("./ServiceKey.json");
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
 
+// === Global MongoDB Client (Reuse) ===
+let client;
+let db;
+let productsCollection;
+let importsCollection;
 
-
-// MongoDB connection 
-const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.jnmaw82.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
-
-const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  }
-});
-
-
-
-// Token verification middleware
-const verifyToken = async (req, res, next) => {
-  const authorization = req.headers.authorization;
-
-  if (!authorization || !authorization.startsWith("Bearer ")) {
-    return res.status(401).json({ success: false, message: "Unauthorized: No token" });
-  }
-
-  const token = authorization.split(" ")[1];
+const connectDB = async () => {
+  if (db) return db; // Reuse
 
   try {
-    const decodedToken = await admin.auth().verifyIdToken(token);
-    req.user = {
-      email: decodedToken.email,
-      uid: decodedToken.uid
-    };
+    client = new MongoClient(process.env.MONGODB_URI, {
+      serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+      },
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 10000,
+    });
 
-    next(); 
+    await client.connect();
+    db = client.db(process.env.DB_NAME);
+    productsCollection = db.collection('products');
+    importsCollection = db.collection('imports');
+    console.log("MongoDB connected (reused)");
+    return db;
   } catch (error) {
-    console.error("Token verification failed:", error);
+    console.error("MongoDB connection failed:", error);
+    throw error;
+  }
+};
+
+// === Verify Token ===
+const verifyToken = async (req, res, next) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, message: "No token" });
+  }
+  try {
+    const decoded = await admin.auth().verifyIdToken(auth.split(' ')[1]);
+    req.user = { email: decoded.email, uid: decoded.uid };
+    next();
+  } catch (error) {
     return res.status(401).json({ success: false, message: "Invalid token" });
   }
 };
 
-
-
-
-
+// === Routes ===
 app.get('/', (req, res) => {
-  res.send('Hello World!!');
+  res.json({ message: 'Car Hub Server is Live!', time: new Date() });
 });
 
-async function run() {
+// Health Check
+app.get('/health', async (req, res) => {
   try {
-    // await client.connect();
-
-    // Database and Collections
-    const db = client.db(process.env.DB_NAME);
-    const productsCollection = db.collection('products');
-    const importsCollection = db.collection('imports')
-
-    // Get All Products
-    app.get('/products', async (req, res) => {
-      const result = await productsCollection.find().toArray();
-      res.send(result);
-    });
-
-
-  // Get Latest 6 Products
-app.get('/latest-products', async (req, res) => {
-  try {
-    const cursor = productsCollection
-      .find()
-      .sort({ created_at: -1 })  
-      .limit(6);                
-
-    const result = await cursor.toArray();
-
-    res.send({
-      success: true,
-      result
-    });
+    await connectDB();
+    res.json({ status: 'OK', db: 'connected', time: new Date() });
   } catch (error) {
-    console.error("Error fetching latest products:", error);
-    res.status(500).send({ success: false, message: "Server error" });
+    res.status(500).json({ status: 'ERROR', db: 'failed' });
   }
 });
 
-
-
-// Get Product Details 
-app.get('/products/:id', verifyToken , async (req, res) => {
+// Get All Products
+app.get('/products', async (req, res) => {
   try {
-    const id = req.params.id;
-
-    // 1. Id validation
-    if (!ObjectId.isValid(id)) {
-      return res.send({
-        success: false,
-        result: null,
-        message: "Invalid ID format"
-      });
-    }
-
-    const query = { _id: new ObjectId(id) };
-    const result = await productsCollection.findOne(query);
-
-    // if product not found 
-    if (!result) {
-      return res.send({
-        success: false,
-        result: null,
-        message: "Product not found"
-      });
-    }
-
-    // success message 
-    res.send({
-      success: true,
-      result
-    });
-
+    await connectDB();
+    const result = await productsCollection.find().toArray();
+    res.json(result);
   } catch (error) {
-    console.error("Product fetch error:", error);
-    res.status(500).send({
-      success: false,
-      result: null,
-      message: "Server error",
-      error: error.message
-    });
+    console.error("GET /products error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
-
-
-// Add Export 
+// Add Export
 app.post('/products', verifyToken, async (req, res) => {
   try {
-    const newProduct = req.body;
-    newProduct.createdBy = req.user.email;
-    newProduct.createdAt = new Date();
-
+    await connectDB();
+    const newProduct = { ...req.body, createdBy: req.user.email, createdAt: new Date() };
     const result = await productsCollection.insertOne(newProduct);
-    res.json({ success: true, insertedId: result.insertedId });
+    res.json({ success: true, insertedId: result.insertedId.toString() });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-
-
-
-// Import Area 
-
-
-// import-product
-app.post('/import-product', verifyToken, async (req, res) => {
-  try {
-    const { productId, importQuantity = 1 } = req.body;
-    const userEmail = req.user.email;
-
-    if (!ObjectId.isValid(productId)) {
-      return res.status(400).json({ success: false, message: "Invalid product ID" });
-    }
-
-    const qty = Number(importQuantity);
-    if (qty < 1) {
-      return res.status(400).json({ success: false, message: "Invalid quantity" });
-    }
-
-    const product = await productsCollection.findOne({ _id: new ObjectId(productId) });
-    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
-
-    if (qty > product.availableQuantity) {
-      return res.status(400).json({ success: false, message: "Not enough stock" });
-    }
-
-    // Check if already imported
-    const existingImport = await importsCollection.findOne({
-      userEmail,
-      productId: new ObjectId(productId)
-    });
-
-    let importId;
-
-    if (existingImport) {
-      // Update existing
-      await importsCollection.updateOne(
-        { _id: existingImport._id },
-        { $inc: { importedQuantity: qty } }
-      );
-      importId = existingImport._id;
-    } else {
-      // Create new
-      const result = await importsCollection.insertOne({
-        userEmail,
-        productId: new ObjectId(productId),
-        importedQuantity: qty,
-        importedAt: new Date(),
-        status: "pending"
-      });
-      importId = result.insertedId;
-    }
-
-    // Reduce stock
-    await productsCollection.updateOne(
-      { _id: new ObjectId(productId) },
-      { $inc: { availableQuantity: -qty } }
-    );
-
-    res.json({ success: true, importId });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, message: "Import failed" });
-  }
-});
-
-
-
-
-//  My Imports
-app.get('/my-imports', verifyToken, async (req, res) => {
-  try {
-    const userEmail = req.user.email;
-
-    const imports = await importsCollection.aggregate([
-      { $match: { userEmail } },
-      {
-        $group: {
-          _id: "$productId",
-          importedQuantity: { $sum: "$importedQuantity" },
-          importIds: { $push: "$_id" } // for removal
-        }
-      },
-      {
-        $lookup: {
-          from: 'products',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'product'
-        }
-      },
-      { $unwind: '$product' },
-      {
-        $project: {
-          _id: "$_id", 
-          productId: "$_id",
-          productImage: "$product.productImage",
-          productName: "$product.productName",
-          price: "$product.price",
-          originCountry: "$product.originCountry",
-          rating: "$product.rating",
-          importedQuantity: 1
-        }
-      }
-    ]).toArray();
-
-    res.json({ success: true, result: imports });
-  } catch (error) {
+    console.error("POST /products error:", error);
     res.status(500).json({ success: false });
   }
 });
 
-//  Remove Import
-app.delete('/my-imports/product/:productId', verifyToken, async (req, res) => {
-  try {
-    const productId = req.params.productId;
-    const userEmail = req.user.email;
-
-    if (!ObjectId.isValid(productId)) {
-      return res.status(400).json({ success: false, message: "Invalid product ID" });
-    }
-
-    // Find any import of this product
-    const importDoc = await importsCollection.findOne({
-      userEmail,
-      productId: new ObjectId(productId)
-    });
-
-    if (!importDoc) {
-      return res.status(404).json({ success: false, message: "No import found" });
-    }
-
-    const qtyToRemove = importDoc.importedQuantity >= 1 ? 1 : importDoc.importedQuantity;
-
-    if (importDoc.importedQuantity === 1) {
-      // Remove document
-      await importsCollection.deleteOne({ _id: importDoc._id });
-    } else {
-      // Reduce quantity
-      await importsCollection.updateOne(
-        { _id: importDoc._id },
-        { $inc: { importedQuantity: -1 } }
-      );
-    }
-
-    // Restore stock
-    await productsCollection.updateOne(
-      { _id: new ObjectId(productId) },
-      { $inc: { availableQuantity: 1 } }
-    );
-
-    res.json({ success: true, productId });
-  } catch (error) {
-    console.error("Delete error:", error);
-    res.status(500).json({ success: false });
-  }
-});
-
-
-
-
-// Export Area
-
-
-
-//  My Exports
+// My Exports
 app.get('/my-exports', verifyToken, async (req, res) => {
   try {
+    await connectDB();
     const result = await productsCollection.find({ createdBy: req.user.email }).toArray();
     res.json({ success: true, result });
   } catch (error) {
@@ -342,74 +123,32 @@ app.get('/my-exports', verifyToken, async (req, res) => {
 // DELETE Product
 app.delete('/products/:id', verifyToken, async (req, res) => {
   try {
-    const { id } = req.params;
-    const userEmail = req.user.email;
-
-    const product = await productsCollection.findOne({ _id: new ObjectId(id), createdBy: userEmail });
-    if (!product) return res.status(404).json({ success: false });
-
-    await productsCollection.deleteOne({ _id: new ObjectId(id) });
-    res.json({ success: true });
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ success: false });
+    await connectDB();
+    const result = await productsCollection.deleteOne({
+      _id: new ObjectId(req.params.id),
+      createdBy: req.user.email
+    });
+    res.json({ success: result.deletedCount > 0 });
   } catch (error) {
     res.status(500).json({ success: false });
   }
 });
 
-//  Update Product
+// UPDATE Product
 app.patch('/products/:id', verifyToken, async (req, res) => {
   try {
-    const { id } = req.params;
-    const updates = req.body;
-    const userEmail = req.user.email;
-
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ success: false });
+    await connectDB();
     const result = await productsCollection.updateOne(
-      { _id: new ObjectId(id), createdBy: userEmail },
-      { $set: updates }
+      { _id: new ObjectId(req.params.id), createdBy: req.user.email },
+      { $set: req.body }
     );
-
-    if (result.matchedCount === 0) return res.status(404).json({ success: false });
-    res.json({ success: true });
+    res.json({ success: result.matchedCount > 0 });
   } catch (error) {
     res.status(500).json({ success: false });
   }
 });
 
-
-
-
-
-
-
-// search 
-app.get("/search", async (req, res) => {
-  try {
-    const search_text = req.query.search?.trim();
-    if (!search_text) return res.send([]);
-
-    const result = await productsCollection
-      .find({ productName: { $regex: search_text, $options: "i" } })
-      .limit(20)
-      .toArray();
-
-    res.send(result);
-  } catch (error) {
-    res.status(500).send({ message: "Server error" });
-  }
-});
-
-
-
-
-
-
-    // await client.db("admin").command({ ping: 1 });
-    console.log(" Successfully connected to MongoDB!");
-  } catch (error) {
-    console.error(" MongoDB connection failed:", error);
-  }
-}
-run().catch(console.dir);
-
-app.listen(port, () => {
-  console.log(` Server is running on port ${port}`);
-});
+// === Vercel Export ===
+module.exports = app;
