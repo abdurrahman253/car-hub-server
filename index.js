@@ -16,7 +16,14 @@ app.use(cors({
 app.use(express.json());
 
 // Firebase Admin
-const serviceAccount = require("./ServiceKey.json");
+let serviceAccount;
+try {
+  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+} catch (error) {
+  console.error("FIREBASE_SERVICE_ACCOUNT parse error:", error);
+  throw new Error("Invalid Firebase config");
+}
+
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
